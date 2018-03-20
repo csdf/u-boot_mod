@@ -106,7 +106,7 @@ typedef volatile unsigned char	vu_char;
 #else
 #define debug(fmt,args...)
 #define debugX(level,fmt,args...)
-#endif	/* DEBUG */
+#endif /* DEBUG */
 
 typedef void (interrupt_handler_t)(void *);
 
@@ -164,8 +164,18 @@ typedef void (interrupt_handler_t)(void *);
 void hang(void) __attribute__ ((noreturn));
 
 /* */
-long int initdram(void);
-void print_size(ulong, const char *);
+long int dram_init(void);
+int      timer_init(void);
+void     usb_init(void);
+void     full_reset(void);
+void     all_led_on(void);
+void     all_led_off(void);
+void     print_size(ulong, const char *);
+void     print_board_info(void);
+void     macaddr_init(unsigned char *);
+void     flash_print_name(void);
+void     cpu_name(char *name);
+unsigned int main_cpu_clk(void);
 
 /* common/main.c */
 void	main_loop		(void);
@@ -175,14 +185,16 @@ void	init_cmd_timeout(void);
 void	reset_cmd_timeout(void);
 
 /* lib_$(ARCH)/board.c */
-void	board_init_f  (ulong);
-void	board_init_r  (gd_t *, ulong);
-int		checkboard    (void);
-int		checkflash    (void);
-int		checkdram     (void);
-char *	strmhz(char *buf, long hz);
-int		last_stage_init(void);
-extern	ulong monitor_flash_len;
+void board_init_f(ulong);
+void board_init_r(gd_t *, ulong);
+char *strmhz(char *buf, long hz);
+int  checkboard(void);
+int  checkflash(void);
+int  checkdram(void);
+int  last_stage_init(void);
+int  last_reset_wdt(void);
+int  reset_button_status(void);
+extern ulong monitor_flash_len;
 
 /* common/flash.c */
 void flash_perror (int);
@@ -190,28 +202,9 @@ void flash_perror (int);
 /* common/cmd_autoscript.c */
 int	autoscript (ulong addr);
 
-/*
- * Only TP-Link OFW and OpenWrt for TP-Link routers
- * use different (simply) image header
- */
-#if !defined(CONFIG_FOR_8DEVICES_CARAMBOLA2) && \
-	!defined(CONFIG_FOR_DLINK_DIR505_A1)     && \
-	!defined(CONFIG_FOR_DRAGINO_V2)          && \
-	!defined(CONFIG_FOR_MESH_POTATO_V2)
-#include "tpLinuxTag.h"
-#endif
-
-/* common/cmd_bootm.c */
-#if defined(CONFIG_FOR_8DEVICES_CARAMBOLA2) || \
-	defined(CONFIG_FOR_DLINK_DIR505_A1)     || \
-	defined(CONFIG_FOR_DRAGINO_V2)          || \
-	defined(CONFIG_FOR_MESH_POTATO_V2)
-void print_image_hdr(image_header_t *hdr);
-#else
-void print_image_hdr(tplink_image_header_t *hdr);
-#endif
-
-extern ulong load_addr;		/* Default Load Address */
+extern u32 load_addr;	/* Default Load Address */
+extern u32 save_addr;	/* Default Save Address */
+extern u32 save_size;	/* Default Save Size */
 
 /* common/cmd_nvedit.c */
 int		env_init     (void);
@@ -219,7 +212,7 @@ void	env_relocate (void);
 char	*getenv	     (char *);
 int		getenv_r     (char *name, char *buf, unsigned len);
 int		saveenv	     (void);
-void	setenv	     (char *, char *);
+int	setenv	     (char *, char *);
 
 
 #ifdef CONFIG_ARM
@@ -401,6 +394,7 @@ void	serial_putc_raw(const char);
 void	serial_puts   (const char *);
 int	serial_getc   (void);
 int	serial_tstc   (void);
+void	serial_setbrg (void);
 
 void	_serial_putc   (const char, const int);
 void	_serial_putc_raw(const char, const int);
@@ -519,6 +513,7 @@ void	wait_ticks    (unsigned long);
 
 /* lib_$(ARCH)/time.c */
 void	udelay	      (unsigned long);
+#define milisecdelay(_x)                        udelay((_x) * 1000)
 ulong	usec2ticks    (unsigned long usec);
 ulong	ticks2usec    (unsigned long ticks);
 int	init_timebase (void);
@@ -531,10 +526,6 @@ unsigned long long	simple_strtoull(const char *cp,char **endp,unsigned int base)
 long	simple_strtol(const char *cp,char **endp,unsigned int base);
 int	sprintf(char * buf, const char *fmt, ...);
 int	vsprintf(char *buf, const char *fmt, va_list args);
-
-/* lib_generic/crc32.c */
-ulong crc32 (ulong, const unsigned char *, uint);
-ulong crc32_no_comp (ulong, const unsigned char *, uint);
 
 /* common/console.c */
 int	console_init_f(void);	/* Before relocation; uses the serial  stuff	*/
@@ -560,6 +551,8 @@ int	tstc(void);
 void	putc(const char c);
 void	puts(const char *s);
 void	printf(const char *fmt, ...);
+void	printf_err(const char *fmt, ...);
+void	printf_wrn(const char *fmt, ...);
 //void	vprintf(const char *fmt, va_list args);
 
 /* stderr */
@@ -584,4 +577,32 @@ int	fgetc(int file);
 
 int	pcmcia_init (void);
 
-#endif	/* __COMMON_H_ */
+/*
+ * Optional BOOTP fields
+ */
+#define CONFIG_BOOTP_SUBNETMASK		0x00000001
+#define CONFIG_BOOTP_GATEWAY		0x00000002
+#define CONFIG_BOOTP_HOSTNAME		0x00000004
+#define CONFIG_BOOTP_NISDOMAIN		0x00000008
+#define CONFIG_BOOTP_BOOTPATH		0x00000010
+#define CONFIG_BOOTP_BOOTFILESIZE	0x00000020
+#define CONFIG_BOOTP_DNS		0x00000040
+#define CONFIG_BOOTP_DNS2		0x00000080
+#define CONFIG_BOOTP_SEND_HOSTNAME	0x00000100
+#define CONFIG_BOOTP_NTPSERVER		0x00000200
+#define CONFIG_BOOTP_TIMEOFFSET		0x00000400
+#define CONFIG_BOOTP_VENDOREX		0x80000000
+
+#define CONFIG_BOOTP_ALL	(~CONFIG_BOOTP_VENDOREX)
+
+#define CONFIG_BOOTP_DEFAULT	(CONFIG_BOOTP_SUBNETMASK |\
+				 CONFIG_BOOTP_BOOTPATH   |\
+				 CONFIG_BOOTP_HOSTNAME   |\
+				 CONFIG_BOOTP_GATEWAY    |\
+				 CONFIG_BOOTP_SEND_HOSTNAME)
+
+#ifndef CONFIG_BOOTP_MASK
+#define CONFIG_BOOTP_MASK	CONFIG_BOOTP_DEFAULT
+#endif
+
+#endif /* __COMMON_H_ */
